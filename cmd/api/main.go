@@ -1,15 +1,29 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log"
 	"net/http"
 )
 
+type Config struct {
+	Host      string // IP address of host machine
+	Port      int
+	StaticDir string // Path to static assets
+}
+
+func (cfg *Config) Addr() string {
+	return fmt.Sprintf("%v:%v", cfg.Host, cfg.Port)
+}
+
 func main() {
-	const host string = "0.0.0.0"
-	const port int = 8080
-	addr := fmt.Sprintf("%v:%v", host, port)
+	cfg := &Config{}
+
+	flag.StringVar(&cfg.Host, "host", "127.0.0.1", "HTTP network address")
+	flag.IntVar(&cfg.Port, "port", 8080, "Port number to run the web server")
+	flag.StringVar(&cfg.StaticDir, "static-dir", "./ui/static", "Path to static assets")
+	flag.Parse()
 
 	mux := http.NewServeMux()
 
@@ -19,11 +33,11 @@ func main() {
 	mux.Handle("/", http.HandlerFunc(homePage))
 	mux.HandleFunc("/about", aboutPage)
 
-	fileServer := http.FileServer(http.Dir("./public"))
+	fileServer := http.FileServer(http.Dir(cfg.StaticDir))
 	mux.Handle("/static/", http.StripPrefix("/static", fileServer))
 
-	log.Printf("Server started on %v", addr)
-	err := http.ListenAndServe(addr, mux)
+	log.Printf("Server started on %v", cfg.Port)
+	err := http.ListenAndServe(cfg.Addr(), mux)
 	if err != nil {
 		log.Fatalf("Failed to start server due to error: %v", err)
 	}
