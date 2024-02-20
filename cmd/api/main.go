@@ -4,7 +4,10 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"os"
+	"strconv"
 )
 
 type Config struct {
@@ -14,17 +17,21 @@ type Config struct {
 }
 
 func (cfg *Config) Addr() string {
-	return fmt.Sprintf("%v:%v", cfg.Host, cfg.Port)
+	return net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port))
 }
 
-func main() {
+func parseCmdFlags() *Config {
 	cfg := &Config{}
 
 	flag.StringVar(&cfg.Host, "host", "127.0.0.1", "HTTP network address")
 	flag.IntVar(&cfg.Port, "port", 8080, "Port number to run the web server")
 	flag.StringVar(&cfg.StaticDir, "static-dir", "./ui/static", "Path to static assets")
 	flag.Parse()
+	return cfg
+}
 
+func main() {
+	cfg := parseCmdFlags()
 	mux := http.NewServeMux()
 
 	// mux.Handle() method expects a http.Handler() function as a 2nd argument
@@ -36,10 +43,20 @@ func main() {
 	fileServer := http.FileServer(http.Dir(cfg.StaticDir))
 	mux.Handle("/static/", http.StripPrefix("/static", fileServer))
 
-	log.Printf("Server started on %v", cfg.Port)
-	err := http.ListenAndServe(cfg.Addr(), mux)
+	// Create a logger for writing information and error messages
+	infoLog := log.New(os.Stdout, "INFO\t", log.LstdFlags|log.Lshortfile)
+	errorLog := log.New(os.Stdout, "ERROR\t", log.LstdFlags|log.Lshortfile)
+
+	server := &http.Server{
+		Addr:     cfg.Addr(),
+		Handler:  mux,
+		ErrorLog: errorLog,
+	}
+
+	infoLog.Printf("Server started on %v", cfg.Addr())
+	err := server.ListenAndServe()
 	if err != nil {
-		log.Fatalf("Failed to start server due to error: %v", err)
+		errorLog.Fatalf("Failed to start server due to error: %v", err)
 	}
 }
 
