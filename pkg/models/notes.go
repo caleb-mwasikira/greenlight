@@ -11,8 +11,8 @@ var ErrNoRecord = errors.New("no matching record found for model")
 
 type Note struct {
 	Id      int       `json:"id,omitempty"`
-	Title   string    `json:"title"`
-	Content string    `json:"content"`
+	Title   string    `json:"title" validate:"required"`
+	Content string    `json:"content" validate:"required"`
 	Created time.Time `json:"created,omitempty"`
 	Expires time.Time `json:"expires,omitempty"`
 }

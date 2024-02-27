@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	models "github.com/caleb-mwasikira/greenlight/pkg/models"
+	"github.com/go-playground/validator"
 )
 
 func (app *Application) CreateNewNote(res http.ResponseWriter, req *http.Request) {
@@ -24,7 +26,27 @@ func (app *Application) CreateNewNote(res http.ResponseWriter, req *http.Request
 		return
 	}
 
-	// TODO: Implement data validation on request body fields
+	// Data validation on request body fields
+	validate := validator.New()
+
+	err = validate.Struct(note)
+	if err != nil {
+		validationErrors := make(map[string]string)
+
+		for _, err := range err.(validator.ValidationErrors) {
+			field := strings.ToLower(err.Field())
+			validationErrors[field] = fmt.Sprintf("%v field of type %v %v on request body", field, err.Type(), err.Tag())
+		}
+
+		data, err := json.MarshalIndent(validationErrors, " ", "")
+		if err != nil {
+			msg := fmt.Sprintf("failed to encode validation errors as json string: %v", err)
+			data = []byte(msg)
+		}
+
+		http.Error(res, string(data), http.StatusBadRequest)
+		return
+	}
 
 	id, err := app.Notes.Insert(note.Title, note.Content, note.Expires)
 	if err != nil {
