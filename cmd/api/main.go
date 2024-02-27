@@ -2,9 +2,9 @@ package main
 
 import (
 	"database/sql"
-	"errors"
 	"flag"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"path"
@@ -23,23 +23,36 @@ import (
 	"github.com/justinas/alice"
 )
 
+func isDirectory(path string) (bool, error) {
+	fileInfo, err := os.Stat(path)
+	if err != nil {
+		return false, err
+	}
+
+	return fileInfo.IsDir(), nil
+}
+
 func parseCmdFlags() *config.Config {
 	conf := &config.Config{}
+	var logDir string
 
 	flag.StringVar(&conf.Host, "host", "127.0.0.1", "HTTP network address")
 	flag.IntVar(&conf.Port, "port", 8080, "Port number to run the web server")
 	flag.StringVar(&conf.StaticDir, "static-dir", "./ui/static", "Path to static assets")
+	flag.StringVar(&logDir, "log-dir", "/tmp/greenlight", "Where to place your server log file. Do you even log?")
 	flag.Parse()
+
+	// Verify that log-dir is a valid directory
+	if isDir, _ := isDirectory(logDir); isDir {
+		conf.LogFile = path.Join(logDir, "info.log")
+	} else {
+		conf.LogFile = path.Join("/tmp/greenlight", "info.log")
+	}
 	return conf
 }
 
 func connectToDatabase() (*sql.DB, error) {
 	var db *sql.DB
-
-	err := godotenv.Load(".env")
-	if err != nil {
-		return nil, errors.New("error loading .env file")
-	}
 
 	// Initialise a new sql.DB object (which is not a database connection but
 	// a pool of connections) based on a DSN(data source name) in the format
@@ -48,7 +61,7 @@ func connectToDatabase() (*sql.DB, error) {
 	// the mysql driver to convert SQL TIME and DATE fields to Go time.Time objects
 	dsn := fmt.Sprintf("%v:%v@/%v?parseTime=True",
 		os.Getenv("DB_USER"), os.Getenv("DB_PASS"), os.Getenv("DB_NAME"))
-	db, err = sql.Open("mysql", dsn)
+	db, err := sql.Open("mysql", dsn)
 	if err != nil {
 		return nil, err
 	}
@@ -68,37 +81,40 @@ func connectToDatabase() (*sql.DB, error) {
 func main() {
 	conf := parseCmdFlags()
 
-	var (
-		logDir      string = "/tmp/greenlight"
-		logFilename string = path.Join(logDir, "out.log")
-	)
-	app := config.NewApplication(conf, "")
-	mux := http.NewServeMux()
+	err := godotenv.Load(".env")
+	if err != nil {
+		log.Fatal("error loading .env file")
+	}
 
-	// Connect server to database
+	// Connect server to DBMS
 	db, err := connectToDatabase()
 	if err != nil {
-		app.ErrorLog.Fatalf("failed to connect to mysql database: %v", err)
+		log.Fatalf("failed to connect to mysql DBMS: %v", err)
 		return
 	}
-	app.InfoLog.Printf("connected to mysql database ...")
+	log.Printf("connected to %s DBMS ...", os.Getenv("DB_DRIVER"))
 
 	// We also defer a call to db.Close(), so that the connection pool is closed
 	// before the main() function exits.
 	defer db.Close()
 
+	app := handlers.NewApplication(conf, db)
+	mux := http.NewServeMux()
+
 	// Initialize middleware
-	loggingHandler := middleware.NewLoggingHandler(logFilename)
-	middlewareChain := alice.New(loggingHandler)
+	loggingHandler := middleware.NewLoggingHandler(conf.LogFile)
+	chain := alice.New(loggingHandler)
 
 	// mux.Handle() method expects a http.Handler() function as a 2nd argument
 	// You can use the http.HandlerFunc() method of the http object to create
 	// a handler from a normal function or call the mux.HandleFunc() method directly
 
 	// Example: mux.Handle("/", http.HandlerFunc(app.HomePage))
-	mux.Handle("/", middlewareChain.ThenFunc(handlers.HomePage))
-	mux.Handle("/about", middlewareChain.ThenFunc(handlers.AboutPage))
-	mux.Handle("/users", middlewareChain.ThenFunc(handlers.UsersPage))
+	mux.Handle("/", chain.ThenFunc(app.HomePage))
+	mux.Handle("/about", chain.ThenFunc(app.AboutPage))
+	mux.Handle("/notes", chain.ThenFunc(app.GetAllNotes))
+	mux.Handle("/notes/create", chain.ThenFunc(app.CreateNewNote))
+	mux.Handle("/notes/note", chain.ThenFunc(app.GetNote))
 
 	fileServer := http.FileServer(http.Dir(conf.StaticDir))
 	mux.Handle("/static/", http.StripPrefix("/static", fileServer))
